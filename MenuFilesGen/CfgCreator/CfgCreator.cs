@@ -1,57 +1,190 @@
-﻿using MenuFilesGen.Models;
+using MenuFilesGen.Models;
+using System.Xml.Linq;
 
 namespace MenuFilesGen.CFG
 {
     public partial class CfgCreator
     {
         /// <summary>
-        /// Initializes a new instance of the <see cref="CfgCreator"/> class.
+        /// Заполняем ленту на основе декларативных скобок { } и [ ]
         /// </summary>
-        /// <param name="cmds">The CMDS.</param>
-        /// <param name="_addOnNameGlobal">The addon name global.</param>
-        public CfgCreator(List<CommandDefinition> cmds, string _addOnNameGlobal, bool isDuplicatePanel)
+        void Ribbon(bool isDuplicatePanel)
         {
-            commandDefinitions = cmds;
-            addonNameGlobal = _addOnNameGlobal;
+            #region Ribbon
+            XDoc = new XDocument();
 
-            Cfg = new CfgDefinition(addonNameGlobal);//конфиг
+            XElement ribbonRoot = new XElement("RibbonRoot");
+            XDoc.Add(ribbonRoot);
 
-            PanelCmd();
+            XElement ribbonPanelSourceCollection = new XElement("RibbonPanelSourceCollection");
+            ribbonRoot.Add(ribbonPanelSourceCollection);
 
-            AppPanel();
+            XElement ribbonTabSourceCollection = new XElement("RibbonTabSourceCollection");
+            ribbonRoot.Add(ribbonTabSourceCollection);
 
-            AppAddonPanel();
+            XElement ribbonTabSource = new XElement("RibbonTabSource");
+            ribbonTabSource.Add(new XAttribute("Text", addonNameGlobal));
+            ribbonTabSource.Add(new XAttribute("UID", $"{addonNameGlobal.Replace(" ", "")}_Tab"));
+            ribbonTabSourceCollection.Add(ribbonTabSource);
 
-            Ribbon(isDuplicatePanel);
+            foreach (IGrouping<string, CommandDefinition> cmd in groupsPanel)
+            {
+                XElement ribbonPanelSource = new XElement("RibbonPanelSource");
+                ribbonPanelSource.Add(new XAttribute("UID", cmd.Key));
+                ribbonPanelSource.Add(new XAttribute("Text", cmd.Key));
+                ribbonPanelSourceCollection.Add(ribbonPanelSource);
 
+                XElement panelButtons = new XElement("Temp");
+
+                XElement currentSubPanel = null;
+                XElement currentSubRow = null;
+
+                List<IGrouping<string, CommandDefinition>> unitedCommands = cmd.GroupBy(c => c.RibbonSplitButtonName).ToList();
+
+                foreach (IGrouping<string, CommandDefinition> unitedCommandGroup in unitedCommands)
+                {
+                    XElement container = ribbonPanelSource;
+                    bool isSplit = !string.IsNullOrWhiteSpace(unitedCommandGroup.Key);
+
+                    if (isSplit)
+                    {
+                        currentSubPanel = null;
+                        currentSubRow = null;
+
+                        XElement ribbonSplitButton = new XElement("RibbonSplitButton");
+                        ribbonSplitButton.Add(new XAttribute("Text", unitedCommandGroup.Key));
+                        ribbonSplitButton.Add(new XAttribute("Behavior", "SplitFollowStaticText"));
+                        ribbonSplitButton.Add(new XAttribute("ButtonStyle", unitedCommandGroup.First().RibbonSize));
+
+                        ribbonPanelSource.Add(ribbonSplitButton);
+                        panelButtons.Add(ribbonSplitButton);
+                        container = ribbonSplitButton;
+                    }
+
+                    foreach (CommandDefinition commandData in unitedCommandGroup)
+                    {
+                        if (commandData.HideCommand) continue;
+
+                        if (!isSplit)
+                        {
+                            // 1. Сначала проверяем скобоки { и [
+                            if (commandData.HasRowPanelStart)
+                            {
+                                currentSubPanel = new XElement("RibbonRowPanel");
+                                ribbonPanelSource.Add(currentSubPanel);
+                            }
+
+                            if (commandData.HasRowStart)
+                            {
+                                currentSubRow = new XElement("RibbonRow");
+                                if (currentSubPanel != null)
+                                    currentSubPanel.Add(currentSubRow);
+                                else
+                                    ribbonPanelSource.Add(currentSubRow);
+                            }
+
+                            // Определяем контейнер для кнопки
+                            if (currentSubRow != null)
+                                container = currentSubRow;
+                            else if (currentSubPanel != null)
+                                container = currentSubPanel;
+                            else
+                                container = ribbonPanelSource;
+                        }
+
+                        // 2. Создаем и добавляем саму кнопку в контейнер
+                        XElement generatedButton = CreateButton(commandData);
+                        container.Add(generatedButton);
+
+                        if (!isSplit)
+                        {
+                            panelButtons.Add(new XElement(generatedButton));
+                        }
+
+                        // 3. после того как кнопка добавлена закрываем контейнеры
+                        if (!isSplit)
+                        {
+                            if (commandData.HasRowEnd)
+                            {
+                                currentSubRow = null;
+                            }
+
+                            if (commandData.HasRowPanelEnd)
+                            {
+                                currentSubPanel = null;
+                                currentSubRow = null;
+                            }
+                        }
+                    }
+                }
+
+                if (!isDuplicatePanel)
+                {
+                    XElement ribbonPanelBreak = new XElement("RibbonPanelBreak");
+                    ribbonPanelSource.Add(ribbonPanelBreak);
+                    XElement ribbonRowDuplicatePanel = new XElement("RibbonRowPanel");
+                    ribbonPanelSource.Add(ribbonRowDuplicatePanel);
+
+                    XElement[] items = panelButtons.Elements().ToArray();
+                    int nameSymbolsCountMax = 0;
+
+                    for (int itemIndex = 0; itemIndex < items.Count(); itemIndex += 2)
+                    {
+                        if (items[itemIndex].Attributes().Any(attr => attr.Name == "Text"))
+                        {
+                            int nameSymbolsCount = items[itemIndex].Attributes().First(attr => attr.Name == "Text").Value.Count();
+                            if (nameSymbolsCount > nameSymbolsCountMax)
+                                nameSymbolsCountMax = nameSymbolsCount;
+                        }
+                    }
+
+                    for (int itemIndex = 0; itemIndex < items.Count(); itemIndex++)
+                    {
+                        XElement item = items[itemIndex];
+                        XElement[] itemButtons;
+
+                        if (item.Name == "RibbonSplitButton")
+                            itemButtons = item.Elements().ToArray();
+                        else
+                        {
+                            itemButtons = new[] { item };
+                        }
+
+                        for (int buttonIndex = 0; buttonIndex < itemButtons.Count(); buttonIndex++)
+                        {
+                            var button = itemButtons[buttonIndex];
+                            var buttonStyleAttr = button.Attributes().FirstOrDefault(attr => attr.Name == "ButtonStyle");
+                            if (buttonStyleAttr != null)
+                            {
+                                buttonStyleAttr.Value = "LargeWithHorizontalText";
+                            }
+                            ribbonRowDuplicatePanel.Add(button);
+
+                            if (itemIndex < items.Count() - 1 || buttonIndex < itemButtons.Count() - 1)
+                            {
+                                XElement separator = new XElement("RibbonSeparator");
+                                ribbonRowDuplicatePanel.Add(separator);
+                            }
+                        }
+                    }
+                }
+
+                XElement ribbonPanelSourceReference = new XElement("RibbonPanelSourceReference");
+                ribbonPanelSourceReference.Add(new XAttribute("PanelId", cmd.Key));
+                ribbonTabSource.Add(ribbonPanelSourceReference);
+            }
+            #endregion
         }
 
-
-        /// <summary>
-        /// Gets or sets the CFG.
-        /// </summary>
-        /// <value>
-        /// The CFG.
-        /// </value>
-        public CfgDefinition Cfg
+        public static XElement CreateButton(CommandDefinition commandData)
         {
-            get => _cfg;
-            set => _cfg = value;
+            XElement ribbonCommandButton = new XElement("RibbonCommandButton");
+            ribbonCommandButton.Add(new XAttribute("Text", commandData.DispName));
+            ribbonCommandButton.Add(new XAttribute("ButtonStyle", commandData.RibbonSize));
+            ribbonCommandButton.Add(new XAttribute("MenuMacroID", commandData.InterName));
+            return ribbonCommandButton;
         }
 
-        List<CommandDefinition> commandDefinitions { get; set; }
-
-        /// <summary>
-        /// "глобальное" имя аддона, имя файла cfg и ленты, root menu если не задано в шаблоне
-        /// </summary>
-        /// <value>
-        /// The addon name global.
-        /// </value>
-        string addonNameGlobal { get; set; }
-
-        CfgDefinition _cfg;
-
-
-
+        public XDocument XDoc { get; private set; }
     }
 }
