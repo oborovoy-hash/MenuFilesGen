@@ -1,4 +1,4 @@
-﻿using MenuFilesGen.Enums;
+using MenuFilesGen.Enums;
 using MenuFilesGen.Service;
 
 namespace MenuFilesGen.Models
@@ -10,47 +10,69 @@ namespace MenuFilesGen.Models
         public string DispName { get; set; }
 
         #region InterName
-        /// <summary> Внутреннее имя команды, как оно определено в dll / nrx / lsp </summary>
-        public string InterName => InterNames[0].Trim();
+        /// <summary> Внутреннее имя команды, очищенное от скобок разметки { } [ ] и знака | </summary>
+        public string InterName
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(InterNameRaw)) return "";
 
+                // Работаем строго от строки из Excel, чтобы обойти любые группировок
+                string raw = InterNameRaw.Trim();
+
+                // Если в ячейке есть палочка |, отрезаем всё, что идет после неё
+                int pipeIndex = raw.IndexOf('|');
+                if (pipeIndex >= 0)
+                {
+                    raw = raw.Substring(0, pipeIndex).Trim();
+                }
+
+                // Полностью очищаем имя макроса/команды от управляющих символов верстки ленты
+                return raw.Replace("{", "")
+                          .Replace("}", "")
+                          .Replace("[", "")
+                          .Replace("]", "");
+            }
+        }
+
+        /// <summary> Флаги разметки структуры для генератора ленты (сканируем сырую строку на лету) </summary>
+        public bool HasRowPanelStart => !string.IsNullOrEmpty(InterNameRaw) && InterNameRaw.Contains("{");
+        public bool HasRowPanelEnd => !string.IsNullOrEmpty(InterNameRaw) && InterNameRaw.Contains("}");
+        public bool HasRowStart => !string.IsNullOrEmpty(InterNameRaw) && InterNameRaw.Contains("[");
+        public bool HasRowEnd => !string.IsNullOrEmpty(InterNameRaw) && InterNameRaw.Contains("]");
+
+        // Оригинальный список, как он был заложен автором изначально
         List<string> InterNames => InterNameRaw.RawSplit();
         public string InterNameRaw { get; set; } = "";
 
-        /// <summary>
-        /// Добавлять перед командой разделитель
+        /// <summary> 
+        /// Добавлять перед командой разделитель.
+        /// Если в сырой ячейке из Excel есть символ '|', 
+        /// этот флаг вернет true, независимо от списков InterNames!
         /// </summary>
-        /// <value>
-        ///   <c>true</c> if this instance is command separator; otherwise, <c>false</c>.
-        /// </value>
-        public bool IsCommandSeparator => InterNames.Count > 1;
-
+        public bool IsCommandSeparator => !string.IsNullOrEmpty(InterNameRaw) && InterNameRaw.Contains("|");
         #endregion
-
 
         /// <summary> Описание команды, показываемое в качестве всплывающей подсказки </summary>
         public string StatusText { get; set; }
 
         #region PanelName
-
-
         /// <summary> имя панели/подменю </summary>
-        public string PanelName => PanelNames[0].Trim();
+        public string PanelName => PanelNames.Count > 0 ? PanelNames[0].Trim() : "";
 
         List<string> PanelNames => PanelNameRaw.RawSplit();
         public string PanelNameRaw { get; set; } = "";
 
         public bool IsPanelSeparator => PanelNames.Count > 1;
-
+        
         #endregion
 
-        /// <summary>
-        /// Флаг виртуальной панели, 
+        /// <summary> Флаг виртуальной панели </summary>
         /// </summary>
         /// <value>
         ///   <c>true</c> Не включать под панель меню, в вкладках ленты выпадающий список; otherwise, <c>false</c>.
         /// </value>
         public bool IsVirtualPanel { get; set; }
-
 
         /// <summary> Размер кнопки на ленте. None - кнопки не будет </summary>
         public string RibbonSize { get; set; }
@@ -85,7 +107,7 @@ namespace MenuFilesGen.Models
         /// <summary> вес команды)) </summary>
         public int Weight { get; set; }
 
-        /// <summary> Тип команды, контекст выполнения , 
+        /// <summary> Тип команды, контекст выполнения </summary>
         /// <br>документ-1</br>
         /// <br>приложение-0</br> </summary>
         public int CmdType { get; set; }
@@ -97,20 +119,13 @@ namespace MenuFilesGen.Models
         public string Accelerators { get; set; }
 
         #region AddonName
-
         /// <summary> аддон </summary>
         //public string AddonName => AddonNames[0].Trim();//x
 
         //List<string> AddonNames => AddonNameRaw.RawSplit();
-
         public string AddonNameRaw { get; set; } = "";
-
-        //public bool IsAddonSeparator => AddonNames.Count > 1;//x
-
         #endregion
-
     }
-
 
     /// <summary> Общие данные по команде not Used </summary>
     public class CommandDefinitionKpc
